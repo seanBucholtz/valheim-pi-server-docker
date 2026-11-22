@@ -1,0 +1,52 @@
+name: valheim
+
+x-logging: &logging
+  # Keep container logs small - they live on the SD card.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  valheim:
+    build:
+      context: .
+      args:
+        EMULATOR_BUILD: ${EMULATOR_BUILD:-rpi4}
+        PIN_BOX64_VERSION: ${PIN_BOX64_VERSION:-}
+    image: valheim-pi:local
+    container_name: valheim
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    env_file: .env
+    ports:
+      - "2456-2457:2456-2457/udp"
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+      - /etc/localtime:/etc/localtime:ro
+    # Leave CPU core 0 free, so the host stays responsive for anything else it runs.
+    cpuset: "${SERVER_CPUS:-1-3}"
+    mem_limit: ${MEMORY_LIMIT:-5g}
+    # Same value = no swap for the container: hitting the limit restarts it
+    # cleanly instead of thrashing the SD-card swap file. Needs the memory
+    # cgroup, like mem_limit (off by default on Raspberry Pi OS; see the docs).
+    memswap_limit: ${MEMORY_LIMIT:-5g}
+    # Valheim saves the world on SIGINT; give it time to finish writing.
+    stop_signal: SIGINT
+    stop_grace_period: 120s
+    logging: *logging
+
+  backup:
+    image: alpine:3.20
+    container_name: valheim-backup
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    env_file: .env
+    volumes:
+      - ${DATA_DIR:-./data}/worlds:/data/worlds:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ./scripts/backup:/scripts:ro
+      - /etc/localtime:/etc/localtime:ro
+    command: ["/bin/sh", "/scripts/backup-loop.sh"]
+    cpuset: "${SERVER_CPUS:-1-3}"
+    logging: *logging
